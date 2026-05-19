@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pbx_portal_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-pbxportal}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme_strong_password}
+      POSTGRES_DB: ${DB_NAME:-pbxportal}
+    volumes:
+      - pbx_db_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - pbx_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-pbxportal}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pbx_portal_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-pbxportal}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme_strong_password}
+      DB_NAME: ${DB_NAME:-pbxportal}
+      JWT_SECRET: ${JWT_SECRET:-changeme_jwt_secret_min_32_chars}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-changeme_32_char_encryption_key_}
+      PBX_HOST: ${PBX_HOST:-pbx.mifijo.com}
+      SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-5}
+    networks:
+      - pbx_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pbx_portal_frontend
+    restart: unless-stopped
+    networks:
+      - pbx_network
+
+  nginx:
+    image: nginx:alpine
+    container_name: pbx_portal_nginx
+    restart: unless-stopped
+    ports:
+      - "${PORTAL_PORT:-8080}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - pbx_network
+
+volumes:
+  pbx_db_data:
+    driver: local
+
+networks:
+  pbx_network:
+    driver: bridge
